@@ -6,10 +6,19 @@ struct ContentView: View {
     @StateObject private var viewModel = ProcessingViewModel()
     @State private var pickerItem: PhotosPickerItem?
     @State private var pickedURL: URL?
-    @State private var shareURL: URL?
-    @State private var showGIFShare = false
+    @State private var shareURLs: [URL] = []
     @State private var showGIFError: String?
+    @State private var showLINESheet = false
+    @State private var lineSeconds: Int = 2
+    @State private var lineExportState: LINEExportState = .idle
     @State private var savedToPhotos = false
+
+    enum LINEExportState: Equatable {
+        case idle
+        case exporting
+        case finished(apng: URL, main: URL, tab: URL, bytes: Int, dims: String, frames: Int)
+        case failed(String)
+    }
 
     var body: some View {
         NavigationStack {
@@ -34,12 +43,13 @@ struct ContentView: View {
             guard let new else { return }
             Task { await loadPicked(new) }
         }
-        .alert("GIF export failed",
+        .alert("Export failed",
                isPresented: Binding(get: { showGIFError != nil },
                                     set: { if !$0 { showGIFError = nil } }),
                presenting: showGIFError) { _ in
             Button("OK", role: .cancel) { }
         } message: { text in Text(text) }
+        .sheet(isPresented: $showLINESheet) { lineExportSheet }
     }
 
     // MARK: - Preview area
@@ -94,22 +104,30 @@ struct ContentView: View {
         VStack(spacing: 10) {
             switch viewModel.state {
             case .finished(_, let portraitURL, _, _):
+                Button {
+                    lineExportState = .idle
+                    showLINESheet = true
+                } label: {
+                    Label("Export as LINE Sticker", systemImage: "bubble.left.and.bubble.right.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+
                 HStack(spacing: 10) {
                     Button {
-                        shareURL = portraitURL
+                        shareURLs = [portraitURL]
                     } label: {
                         Label("Share Video", systemImage: "square.and.arrow.up")
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.bordered)
 
                     Button {
                         Task {
                             do {
                                 let gif = try await GIFExporter.export(
                                     transparentHEVC: portraitURL)
-                                shareURL = gif
-                                showGIFShare = true
+                                shareURLs = [gif]
                             } catch {
                                 showGIFError = error.localizedDescription
                             }
@@ -190,11 +208,154 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: Binding(
-            get: { shareURL != nil },
-            set: { if !$0 { shareURL = nil; showGIFShare = false } })) {
-            if let shareURL {
-                ShareSheet(items: [shareURL])
+            get: { !shareURLs.isEmpty },
+            set: { if !$0 { shareURLs = [] } })) {
+            ShareSheet(items: shareURLs)
+        }
+    }
+
+    // MARK: - LINE export sheet
+
+    @ViewBuilder
+    private var lineExportSheet: some View {
+        NavigationStack {
+            VStack(spacing: 20) {
+                switch lineExportState {
+                case .idle:
+                    lineExportForm
+                case .exporting:
+                    ProgressView("Building APNG…")
+                        .padding()
+                case .finished(let apng, let main, let tab, let bytes, let dims, let frames):
+                    lineExportResult(apng: apng, main: main, tab: tab,
+                                     bytes: bytes, dims: dims, frames: frames)
+                case .failed(let message):
+                    VStack(spacing: 12) {
+                        Image(systemName: "xmark.octagon.fill")
+                            .font(.system(size: 48))
+                            .foregroundStyle(.red)
+                        Text(message)
+                            .multilineTextAlignment(.center)
+                            .font(.callout)
+                        Button("Close") { showLINESheet = false }
+                            .buttonStyle(.bordered)
+                    }
+                    .padding()
+                }
+                Spacer()
             }
+            .navigationTitle("LINE Sticker")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Close") { showLINESheet = false }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    @ViewBuilder
+    private var lineExportForm: some View {
+        Form {
+            Section {
+                Picker("Playback", selection: $lineSeconds) {
+                    ForEach([1, 2, 3, 4], id: \.self) { s in
+                        Text("\(s) s").tag(s)
+                    }
+                }
+                .pickerStyle(.segmented)
+            } header: {
+                Text("Playback time")
+            } footer: {
+                Text("LINE accepts 1, 2, 3 or 4 seconds only. The clip is resampled evenly across the full source.")
+            }
+            Section {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Canvas auto-fits 320×270", systemImage: "rectangle.center.inset.filled")
+                    Label("15 frames APNG, 1 loop", systemImage: "film.stack")
+                    Label("≤ 1 MB checked", systemImage: "scalemass")
+                }
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            }
+        }
+
+        Button {
+            Task { await runLINEExport() }
+        } label: {
+            Label("Build APNG + Main + Tab", systemImage: "wand.and.sparkles")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.borderedProminent)
+        .padding(.horizontal)
+        .padding(.bottom, 12)
+    }
+
+    @ViewBuilder
+    private func lineExportResult(apng: URL, main: URL, tab: URL,
+                                   bytes: Int, dims: String, frames: Int) -> some View {
+        VStack(spacing: 14) {
+            VStack(spacing: 4) {
+                Label("APNG sticker ready", systemImage: "checkmark.seal.fill")
+                    .foregroundStyle(.green)
+                    .font(.headline)
+                Text("\(dims) · \(frames) frames · \(bytes / 1024) KB")
+                    .font(.footnote.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 10) {
+                Button {
+                    shareURLs = [apng, main, tab]
+                    showLINESheet = false
+                } label: {
+                    Label("Share 3 Files", systemImage: "square.and.arrow.up")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button {
+                    shareURLs = [apng]
+                    showLINESheet = false
+                } label: {
+                    Label("Share APNG Only", systemImage: "square.and.arrow.up.on.square")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+            }
+            .padding(.horizontal)
+
+            Text("""
+            Combine 8, 16, or 24 APNGs into a ZIP to submit to LINE \
+            Creators Market. Main image = 240×240, tab icon = 96×74 — \
+            generated from the middle frame.
+            """)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+        }
+    }
+
+    private func runLINEExport() async {
+        guard case .finished(_, let url, _, _) = viewModel.state else { return }
+        lineExportState = .exporting
+        do {
+            let out = try await APNGExporter.export(
+                from: url,
+                params: APNGExporter.Params(playbackSeconds: lineSeconds,
+                                            frameCount: 15,
+                                            loops: 1))
+            lineExportState = .finished(
+                apng: out.apngURL,
+                main: out.mainImageURL,
+                tab: out.tabImageURL,
+                bytes: out.fileBytes,
+                dims: "\(out.dimensions.width)×\(out.dimensions.height)",
+                frames: out.frameCount)
+        } catch {
+            lineExportState = .failed(error.localizedDescription)
         }
     }
 

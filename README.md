@@ -2,9 +2,23 @@
 
 Turn any short video into a transparent sticker — fully on-device.
 
-Pick a clip, tap **Cut Out Subject**, get back a transparent HEVC / GIF of
-just the subject. Save to Photos, share to LINE / iMessage / TikTok /
-Instagram. No account, no upload, no subscription.
+Pick a clip, tap **Cut Out Subject**, get back a transparent HEVC / GIF /
+**LINE-compliant APNG** of just the subject. Save to Photos, share to LINE
+Creators Market / iMessage / TikTok / Instagram. No account, no upload,
+no subscription.
+
+## LINE sticker support
+
+`Export as LINE Sticker` produces three files ready for LINE Creators Market:
+
+- **sticker.png** — animated APNG matching LINE's animation sticker spec
+  (≤ 320×270 canvas with the longer side ≥ 270 px, 15 frames, 1, 2, 3 or
+  4 second playback, ≤ 1 MB, transparent background, RGB).
+- **main.png** — 240×240 static preview (LINE main image).
+- **tab.png** — 96×74 static tab icon.
+
+Build 8, 16, or 24 APNGs (one per video clip), zip them up, and submit
+to [LINE Creators Market](https://creator.line.me/).
 
 ## How it works
 
