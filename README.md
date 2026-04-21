@@ -23,11 +23,18 @@ Two modes:
 1. Pick pack size (**8 / 16 / 24**, matching LINE's allowed counts)
 2. Fill each slot with a video (tap "+")
 3. Tap ⭐ on any ready slot to use it as the main/tab icon source
-4. **Process All Queued** — sequential matting + APNG encoding for every slot
+4. **Process All Queued** — sparse-sampled MatAnyone (16 inferences / slot
+   instead of every source frame) + APNG encoding
 5. **Export LINE ZIP** — emits a single `line_pack_N.zip` containing:
    - `01.png` … `NN.png` (animated stickers)
    - `main.png` (240×240)
    - `tab.png` (96×74)
+
+Typical batch time on iPhone 13: **~15 s per slot**, so a full 24-sticker
+pack finishes in under 6 minutes. Earlier versions processed every source
+frame; `StickerPipeline` samples only the frames that end up in the
+APNG (15 outputs + 1 pre-warm), dropping the previous 24-minute estimate
+by ~8×.
 
 The ZIP is verified to stay under LINE's 60 MB limit and is shareable
 directly to AirDrop / Mail / iCloud for upload to

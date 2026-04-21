@@ -19,7 +19,7 @@ final class PackBuilderViewModel: ObservableObject {
     @Published var mainSourceSlot: Int = 0
     @Published var globalState: GlobalState = .idle
 
-    private let pipeline = CutoutPipeline()
+    private let pipeline = StickerPipeline()
     private var batchTask: Task<Void, Never>?
 
     var hasPendingWork: Bool {
@@ -119,33 +119,33 @@ final class PackBuilderViewModel: ObservableObject {
 
             do {
                 slots[slotIndex] = .matting(0)
-                let matted = try await pipeline.run(videoURL: videoURL) { [weak self] progress in
+                let out = try await pipeline.run(
+                    videoURL: videoURL,
+                    playbackSeconds: playbackSeconds,
+                    frameCount: 15,
+                    loops: 1
+                ) { [weak self] progress in
                     Task { @MainActor in
                         guard let self else { return }
-                        if case .matting = self.slots[slotIndex] {
+                        switch progress.stage {
+                        case .sampling, .masking, .matting:
                             self.slots[slotIndex] = .matting(progress.fraction)
+                        case .encoding:
+                            self.slots[slotIndex] = .encoding
+                        case .done:
+                            break
                         }
                     }
                 }
                 if Task.isCancelled { break }
 
-                slots[slotIndex] = .encoding
-                let out = try await APNGExporter.export(
-                    from: matted.mp4URL,
-                    params: APNGExporter.Params(
-                        playbackSeconds: playbackSeconds,
-                        frameCount: 15, loops: 1))
-
                 slots[slotIndex] = .ready(SlotArtifacts(
                     apngURL: out.apngURL,
                     mainImageURL: out.mainImageURL,
                     tabImageURL: out.tabImageURL,
-                    bytes: out.fileBytes,
-                    width: out.dimensions.width,
-                    height: out.dimensions.height))
-
-                // Free the intermediate matted .mov to keep disk usage reasonable.
-                try? FileManager.default.removeItem(at: matted.mp4URL)
+                    bytes: out.bytes,
+                    width: out.width,
+                    height: out.height))
             } catch {
                 slots[slotIndex] = .failed(error.localizedDescription)
             }

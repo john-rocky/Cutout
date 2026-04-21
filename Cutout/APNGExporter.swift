@@ -157,6 +157,89 @@ enum APNGExporter {
                       fileBytes: apngData.count)
     }
 
+    // MARK: - Low-level public APIs (used by sparse pipeline)
+
+    /// Encode already-rendered straight-alpha RGBA frames as an APNG. Does
+    /// not touch the filesystem; caller writes the returned bytes.
+    public static func encodeAnimatedAPNG(frames rgbaFrames: [[UInt8]],
+                                           width: Int, height: Int,
+                                           playbackSeconds: Int,
+                                           loops: Int) -> Data {
+        let (num, den) = frameDelay(playbackSeconds: playbackSeconds,
+                                     frameCount: rgbaFrames.count)
+        return buildAPNG(width: width, height: height,
+                         frames: rgbaFrames,
+                         delayNum: num, delayDen: den,
+                         numPlays: UInt32(max(1, min(4, loops))))
+    }
+
+    /// Encode a single straight-alpha RGBA buffer as a static PNG (IHDR +
+    /// IDAT + IEND only, no animation chunks).
+    public static func encodeStaticPNG(rgba: [UInt8],
+                                        width: Int, height: Int) throws -> Data {
+        var out = Data()
+        out.append(contentsOf: [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+        out.append(ihdr(width: width, height: height))
+        let filtered = filterRGBA(rgba, width: width, height: height)
+        guard let compressed = zlibCompress(filtered) else {
+            throw APNGError.deflateFailed
+        }
+        out.append(chunk(type: "IDAT", data: compressed))
+        out.append(chunk(type: "IEND", data: []))
+        return out
+    }
+
+    /// Render a source frame + alpha mask into a straight-alpha RGBA buffer
+    /// sized `(canvasW × canvasH)`. When `fitAspect == true` the source is
+    /// aspect-scaled and centered with transparent padding; otherwise the
+    /// source is stretched to fill.
+    public static func composeSubjectRGBA(source: CGImage,
+                                           alpha: CGImage,
+                                           canvasW: Int, canvasH: Int,
+                                           fitAspect: Bool) -> [UInt8] {
+        var raw = [UInt8](repeating: 0, count: canvasW * canvasH * 4)
+        guard let ctx = CGContext(
+            data: &raw, width: canvasW, height: canvasH,
+            bitsPerComponent: 8, bytesPerRow: canvasW * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+            return raw
+        }
+        ctx.clear(CGRect(x: 0, y: 0, width: canvasW, height: canvasH))
+        ctx.interpolationQuality = .high
+
+        let drawRect: CGRect
+        if fitAspect {
+            let scale = min(Double(canvasW) / Double(source.width),
+                            Double(canvasH) / Double(source.height))
+            let dw = Int((Double(source.width) * scale).rounded())
+            let dh = Int((Double(source.height) * scale).rounded())
+            drawRect = CGRect(x: (canvasW - dw) / 2,
+                              y: (canvasH - dh) / 2,
+                              width: dw, height: dh)
+        } else {
+            drawRect = CGRect(x: 0, y: 0, width: canvasW, height: canvasH)
+        }
+
+        ctx.saveGState()
+        ctx.clip(to: drawRect, mask: alpha)
+        ctx.draw(source, in: drawRect)
+        ctx.restoreGState()
+
+        // Un-premultiply.
+        var i = 0
+        while i < raw.count {
+            let a = raw[i + 3]
+            if a != 0 && a != 255 {
+                raw[i]     = UInt8(min(255, (Int(raw[i])     * 255 + Int(a) / 2) / Int(a)))
+                raw[i + 1] = UInt8(min(255, (Int(raw[i + 1]) * 255 + Int(a) / 2) / Int(a)))
+                raw[i + 2] = UInt8(min(255, (Int(raw[i + 2]) * 255 + Int(a) / 2) / Int(a)))
+            }
+            i += 4
+        }
+        return raw
+    }
+
     // MARK: - Dimension logic
 
     /// LINE rules: max 320×270, longer side ≥270, if height is longer it
