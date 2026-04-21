@@ -37,7 +37,10 @@ final class ProcessingViewModel: ObservableObject {
     private func runPipeline(url: URL) async {
         // 1. Ensure MatAnyone mlpackages are on disk.
         do {
-            let requiredIds = ["matanyone", "rmbg_1_4"]
+            // Only MatAnyone needs downloading — the first-frame seed
+            // mask now comes from Vision (person seg + foreground instance),
+            // no CoreMLZoo RMBG fallback.
+            let requiredIds = ["matanyone"]
             for modelId in requiredIds {
                 let isInstalled = await CMZModelStore.shared.isInstalled(id: modelId)
                 if isInstalled { continue }

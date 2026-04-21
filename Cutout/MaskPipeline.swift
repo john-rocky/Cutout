@@ -2,19 +2,19 @@ import Foundation
 import CoreGraphics
 import CoreImage
 import Vision
-import CoreMLZoo
 
-/// First-frame mask generation for MatAnyone seeding.
+/// First-frame mask generation for MatAnyone seeding. 100% on-device,
+/// uses only Apple Vision — no extra model download.
 ///
 /// Tries in order:
-/// 1. Vision `VNGeneratePersonSegmentationRequest(.accurate)` — free, fast,
-///    works for most human subjects.
-/// 2. CoreMLZoo `BackgroundRemovalRequest` (RMBG-1.4) — salient subject
-///    detection for pets / products / objects when person segmentation
-///    produces a near-empty mask.
+/// 1. `VNGeneratePersonSegmentationRequest(.accurate)` — fast, high
+///    quality for human subjects.
+/// 2. `VNGenerateForegroundInstanceMaskRequest` (iOS 17+) — salient-
+///    subject foreground mask for pets, products, and any object
+///    Person Segmentation can't pick up.
 ///
-/// Output is a binarised single-channel CGImage matching `targetSize`,
-/// ready to hand to `VideoMattingSession`.
+/// Output: binarised single-channel CGImage at `targetSize`, ready to
+/// hand to `VideoMattingSession`.
 enum MaskPipeline {
 
     enum SourceModel: Equatable {
@@ -28,7 +28,8 @@ enum MaskPipeline {
     }
 
     /// Sum of mask pixels / total pixels. Below 0.5% we consider Vision
-    /// person segmentation to have "found nothing" and fall back to RMBG.
+    /// person segmentation to have "found nothing" and fall back to the
+    /// foreground-instance request.
     private static let personCoverageFloor: Double = 0.005
 
     static func generate(from firstFrame: CGImage,
@@ -39,9 +40,14 @@ enum MaskPipeline {
            coverage(of: mask) > personCoverageFloor {
             return MaskResult(mask: mask, source: .person)
         }
-        // Fall through to salient subject matting.
-        let salient = try await salientMask(from: firstFrame, targetSize: targetSize)
-        return MaskResult(mask: salient, source: .salient)
+        // Fall through to foreground-instance salient matting.
+        if let salient = try await foregroundInstanceMask(from: firstFrame,
+                                                           targetSize: targetSize) {
+            return MaskResult(mask: salient, source: .salient)
+        }
+        // Last-ditch: an empty mask lets MatAnyone's decoder compute its
+        // own initial alpha without a hint (lower quality but still runs).
+        return MaskResult(mask: blankMask(size: targetSize), source: .salient)
     }
 
     // MARK: - Vision Person Segmentation
@@ -59,22 +65,25 @@ enum MaskPipeline {
         }.value
     }
 
-    // MARK: - Salient subject (RMBG)
+    // MARK: - Foreground-Instance Mask (iOS 17+)
 
-    private static func salientMask(from image: CGImage,
-                                     targetSize: CGSize) async throws -> CGImage {
-        let result = try await BackgroundRemovalRequest().perform(on: image)
-        // Resize the full-res mask to `targetSize`.
-        let ciMask = CIImage(cgImage: result.mask)
-        let sx = targetSize.width  / ciMask.extent.width
-        let sy = targetSize.height / ciMask.extent.height
-        let scaled = ciMask.transformed(by: CGAffineTransform(scaleX: sx, y: sy))
-        let ctx = CIContext(options: [.useSoftwareRenderer: false])
-        guard let cg = ctx.createCGImage(scaled,
-                                          from: CGRect(origin: .zero, size: targetSize)) else {
-            return result.mask
-        }
-        return cg
+    private static func foregroundInstanceMask(from image: CGImage,
+                                                 targetSize: CGSize) async throws -> CGImage? {
+        try await Task.detached(priority: .userInitiated) { () -> CGImage? in
+            let req = VNGenerateForegroundInstanceMaskRequest()
+            let handler = VNImageRequestHandler(cgImage: image, options: [:])
+            try handler.perform([req])
+            guard let observation = req.results?.first else { return nil }
+            let allInstances = observation.allInstances
+            guard !allInstances.isEmpty else { return nil }
+            // Merged mask of every detected salient instance — for
+            // MatAnyone's first-frame seed we want "everything the user
+            // intended to cut out" in one layer.
+            let merged = try observation.generateScaledMaskForImage(
+                forInstances: allInstances,
+                from: handler)
+            return Self.resize(pixelBuffer: merged, to: targetSize)
+        }.value
     }
 
     // MARK: - Helpers
@@ -100,5 +109,21 @@ enum MaskPipeline {
         var sum: UInt64 = 0
         for v in bytes where v > 127 { sum += 1 }
         return Double(sum) / Double(w * h)
+    }
+
+    /// Empty (all-black) mask used only as a fall-through when Vision
+    /// produces nothing — MatAnyone will decode its own first-frame
+    /// alpha without a hint.
+    private static func blankMask(size: CGSize) -> CGImage {
+        let w = Int(size.width), h = Int(size.height)
+        let bytes = [UInt8](repeating: 0, count: w * h)
+        let provider = CGDataProvider(data: Data(bytes) as CFData)!
+        return CGImage(
+            width: w, height: h,
+            bitsPerComponent: 8, bitsPerPixel: 8, bytesPerRow: w,
+            space: CGColorSpaceCreateDeviceGray(),
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
+            provider: provider, decode: nil,
+            shouldInterpolate: false, intent: .defaultIntent)!
     }
 }

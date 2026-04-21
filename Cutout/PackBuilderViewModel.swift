@@ -100,13 +100,13 @@ final class PackBuilderViewModel: ObservableObject {
         }
         globalState = .batchRunning(current: 0, total: indicesToRun.count)
 
-        // Ensure required mlpackages are on disk (triggered by first
-        // slot's pipeline call anyway, but showing global progress first
-        // is friendlier). Fire-and-forget.
-        for modelId in ["matanyone", "rmbg_1_4"] {
-            if await CMZModelStore.shared.isInstalled(id: modelId) { continue }
+        // Ensure MatAnyone is on disk. RMBG is no longer needed — Cutout
+        // uses only Apple Vision for the first-frame seed mask
+        // (VNGeneratePersonSegmentationRequest / VNGenerateForegroundInstanceMaskRequest),
+        // which keeps the first-run download limited to MatAnyone alone.
+        if !(await CMZModelStore.shared.isInstalled(id: "matanyone")) {
             do {
-                for try await _ in CMZModelStore.shared.download(id: modelId) {}
+                for try await _ in CMZModelStore.shared.download(id: "matanyone") {}
             } catch {
                 // Let per-slot processing surface the error; continue here.
             }

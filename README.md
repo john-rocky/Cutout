@@ -17,11 +17,11 @@ can drop into:
 
 ## How it works
 
-1. Vision `VNGeneratePersonSegmentationRequest(.accurate)` for the
+1. `VNGeneratePersonSegmentationRequest(.accurate)` for the
    first-frame subject mask (humans).
-2. Falls back to [CoreMLZoo](https://github.com/john-rocky/CoreMLZoo)
-   `BackgroundRemovalRequest` (RMBG-1.4) when no person is detected —
-   pets, products, plushies, whatever.
+2. Falls back to `VNGenerateForegroundInstanceMaskRequest` (iOS 17+)
+   when no person is detected — pets, products, plushies, whatever.
+   Both requests are 100% Vision, no extra model download.
 3. `VideoMattingSession` (CoreMLZoo → MatAnyone) propagates the
    first-frame mask across every frame, per-frame ring buffer so the
    mask stays temporally stable.
@@ -62,9 +62,12 @@ finishes in under 6 minutes.
 
 ## First run
 
-The app downloads MatAnyone (~111 MB) + RMBG (~42 MB) from HuggingFace
-via CoreMLZoo on first use. Downloads resume across app launches.
-After first run: fully offline.
+The app downloads MatAnyone (~111 MB FP16; ~28 MB once the
+INT8-palettized build is live on HF) from HuggingFace via CoreMLZoo on
+first use. Downloads resume across app launches. After first run:
+fully offline. RMBG is **not** used — the first-frame subject mask
+comes from Apple Vision (`VNGeneratePersonSegmentationRequest` +
+`VNGenerateForegroundInstanceMaskRequest`).
 
 ## Known limits
 
