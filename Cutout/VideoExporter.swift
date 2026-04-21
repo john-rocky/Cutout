@@ -77,6 +77,22 @@ enum VideoExporter {
         }
     }
 
+    /// Save a GIF (or any non-video image file) to Photos. iOS 17 Messages
+    /// lets users long-press a saved GIF inside the keyboard and tap
+    /// "Add Sticker" → the GIF becomes a reusable animated sticker.
+    static func saveImageToPhotos(_ url: URL) async throws {
+        let status = await withCheckedContinuation { (c: CheckedContinuation<PHAuthorizationStatus, Never>) in
+            PHPhotoLibrary.requestAuthorization(for: .addOnly) { c.resume(returning: $0) }
+        }
+        guard status == .authorized || status == .limited else {
+            throw ExportError.photosDenied
+        }
+        try await PHPhotoLibrary.shared().performChanges {
+            let req = PHAssetCreationRequest.forAsset()
+            req.addResource(with: .photo, fileURL: url, options: nil)
+        }
+    }
+
     private static func needsRotation(sourceOrientation: CGImagePropertyOrientation) -> Bool {
         switch sourceOrientation {
         case .right, .left, .rightMirrored, .leftMirrored: return true

@@ -65,7 +65,9 @@ struct ContentView: View {
                 Image(systemName: "scissors.badge.ellipsis")
                     .font(.system(size: 60))
                     .foregroundStyle(.secondary)
-                Text("Pick a short video (≤ 10 s recommended)\nto cut out the subject.")
+                Text("Animated stickers from any video")
+                    .font(.headline)
+                Text("Pick a short clip (≤ 10 s). The app cuts out\nthe subject with a transparent background —\nready for iMessage, LINE, Discord, Reels.")
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
                     .font(.callout)
@@ -122,22 +124,30 @@ struct ContentView: View {
                     }
                     .buttonStyle(.bordered)
 
-                    Button {
-                        Task {
-                            do {
-                                let gif = try await GIFExporter.export(
-                                    transparentHEVC: portraitURL)
-                                shareURLs = [gif]
-                            } catch {
-                                showGIFError = error.localizedDescription
-                            }
+                    Menu {
+                        Button {
+                            Task { await exportGIF(sourceURL: portraitURL, mode: .share) }
+                        } label: {
+                            Label("Share GIF", systemImage: "square.and.arrow.up")
+                        }
+                        Button {
+                            Task { await exportGIF(sourceURL: portraitURL, mode: .saveToPhotos) }
+                        } label: {
+                            Label("Save GIF to Photos",
+                                  systemImage: "square.and.arrow.down")
                         }
                     } label: {
-                        Label("Export GIF", systemImage: "photo.stack")
+                        Label("GIF for Messages", systemImage: "photo.stack")
                             .frame(maxWidth: .infinity)
                     }
+                    .menuStyle(.borderlessButton)
                     .buttonStyle(.bordered)
                 }
+
+                Text("Save to Photos, then long-press the GIF inside Messages → **Add Sticker** to make it a reusable animated sticker.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
 
                 HStack(spacing: 10) {
                     Button {
@@ -335,6 +345,25 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
+        }
+    }
+
+    // MARK: - GIF helpers
+
+    enum GIFExportMode { case share, saveToPhotos }
+
+    private func exportGIF(sourceURL: URL, mode: GIFExportMode) async {
+        do {
+            let gifURL = try await GIFExporter.export(transparentHEVC: sourceURL)
+            switch mode {
+            case .share:
+                shareURLs = [gifURL]
+            case .saveToPhotos:
+                try await VideoExporter.saveImageToPhotos(gifURL)
+                savedToPhotos = true
+            }
+        } catch {
+            showGIFError = error.localizedDescription
         }
     }
 
