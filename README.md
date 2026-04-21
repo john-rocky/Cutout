@@ -81,6 +81,27 @@ Cutout is the reference consumer app for
 `VideoMattingSession`, `BackgroundRemovalRequest`, or the download
 manager surface here first.
 
+## Pre-App-Store checklist
+
+Things you (the dev) still need to provide before submission:
+
+- [ ] **App Icon** — drop a 1024×1024 PNG into
+      `Cutout/Assets.xcassets/AppIcon.appiconset/`
+- [ ] **Launch screen** — either storyboard or leave the generated
+      default (`INFOPLIST_KEY_UILaunchScreen_Generation = YES` is
+      already set in `project.pbxproj`)
+- [ ] **App Store screenshots** — 6.7" + 6.1" + iPad (if you want
+      iPad) per Apple's current spec
+- [ ] **Privacy manifest** — `PrivacyInfo.xcprivacy` is optional for
+      this app (no tracking, no third-party analytics), but Apple
+      recommends declaring the API categories you use. Add one if the
+      submission flags require it.
+- [ ] **TestFlight internal round** — MatAnyone + RMBG download on
+      first run is the main thing to verify on cellular/offline
+
+Everything else (bundle id, entitlements, capabilities) is already
+wired in the project.
+
 ## License
 
 MIT (app code). Model weights follow their own licenses — see the
