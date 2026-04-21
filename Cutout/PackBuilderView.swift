@@ -316,7 +316,7 @@ private struct SlotView: View {
                 Image(systemName: "video.fill")
                 Text("Queued").font(.caption2)
             }
-            .foregroundStyle(.accentColor)
+            .foregroundStyle(Color.accentColor)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .matting(let p):
             VStack(spacing: 4) {

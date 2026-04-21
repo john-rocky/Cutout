@@ -1,0 +1,15 @@
+{
+  "originHash" : "893696f7a513e88f2ab9991c60111e3d15b99e8a1ecabfbe13d2ee4a205e5fc0",
+  "pins" : [
+    {
+      "identity" : "coremlzoo",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/john-rocky/CoreMLZoo.git",
+      "state" : {
+        "revision" : "0d2a398fcc47ca98a30dce3317be105ab522a4ed",
+        "version" : "0.1.0"
+      }
+    }
+  ],
+  "version" : 3
+}
