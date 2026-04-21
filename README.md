@@ -9,16 +9,29 @@ no subscription.
 
 ## LINE sticker support
 
-`Export as LINE Sticker` produces three files ready for LINE Creators Market:
+Two modes:
 
+### Cutout tab — single sticker
+`Export as LINE Sticker` on a matted clip produces three files:
 - **sticker.png** — animated APNG matching LINE's animation sticker spec
-  (≤ 320×270 canvas with the longer side ≥ 270 px, 15 frames, 1, 2, 3 or
-  4 second playback, ≤ 1 MB, transparent background, RGB).
-- **main.png** — 240×240 static preview (LINE main image).
+  (≤ 320×270 canvas with the longer side ≥ 270 px, 15 frames, 1/2/3/4 s
+  playback, ≤ 1 MB, transparent RGB).
+- **main.png** — 240×240 static preview.
 - **tab.png** — 96×74 static tab icon.
 
-Build 8, 16, or 24 APNGs (one per video clip), zip them up, and submit
-to [LINE Creators Market](https://creator.line.me/).
+### Pack tab — full submission bundle
+1. Pick pack size (**8 / 16 / 24**, matching LINE's allowed counts)
+2. Fill each slot with a video (tap "+")
+3. Tap ⭐ on any ready slot to use it as the main/tab icon source
+4. **Process All Queued** — sequential matting + APNG encoding for every slot
+5. **Export LINE ZIP** — emits a single `line_pack_N.zip` containing:
+   - `01.png` … `NN.png` (animated stickers)
+   - `main.png` (240×240)
+   - `tab.png` (96×74)
+
+The ZIP is verified to stay under LINE's 60 MB limit and is shareable
+directly to AirDrop / Mail / iCloud for upload to
+[LINE Creators Market](https://creator.line.me/).
 
 ## How it works
 
