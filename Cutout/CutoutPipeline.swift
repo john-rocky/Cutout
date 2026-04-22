@@ -74,9 +74,20 @@ actor CutoutPipeline {
         let canvasH = VideoMattingSession.frameHeight  // 432
 
         let nominalFps = try await track.load(.nominalFrameRate)
-        let fps = max(1.0, Double(nominalFps == 0 ? 30 : nominalFps))
+        let sourceFps = max(1.0, Double(nominalFps == 0 ? 30 : nominalFps))
+        // Decimate to ≤10 fps output. The app targets animated stickers
+        // (LINE APNG / chat GIF), where 5-20 frames over 1-4 s is the
+        // format ceiling. 10 fps gives a ~100 ms inference gap — well
+        // inside MatAnyone's temporal-attention comfort zone — and lines
+        // up with LINE's max density (20-frame × 2 s sticker = exactly
+        // 10 fps, no further subsampling). Going below ~5 fps starts to
+        // drag the matte on fast motion.
+        let targetFps: Double = 10.0
+        let frameStep = max(1, Int((sourceFps / targetFps).rounded()))
+        let outputFps = sourceFps / Double(frameStep)
         let duration = try await asset.load(.duration)
-        let totalFrames = max(1, Int((duration.seconds * fps).rounded()))
+        let totalSourceFrames = max(1, Int((duration.seconds * sourceFps).rounded()))
+        let totalOutputFrames = max(1, (totalSourceFrames + frameStep - 1) / frameStep)
 
         // Set up reader.
         let reader = try AVAssetReader(asset: asset)
@@ -142,34 +153,41 @@ actor CutoutPipeline {
         writer.startSession(atSourceTime: .zero)
 
         // Process the first frame (reuse the already-rotated CGImage).
-        var frameIndex = 0
+        // `srcIndex` counts source frames pulled from the reader (including
+        // skipped ones); `outIndex` counts frames actually fed to MatAnyone
+        // and written to the output.
+        var srcIndex = 0
+        var outIndex = 0
         try await appendFrame(session: session,
                               frame: firstFrame,
-                              index: frameIndex,
-                              fps: fps,
+                              index: outIndex,
+                              fps: outputFps,
                               adaptor: pbAdaptor,
                               canvasW: canvasW, canvasH: canvasH)
-        frameIndex += 1
-        onProgress(Progress(stage: .processing(frame: frameIndex, total: totalFrames),
-                            fraction: Double(frameIndex) / Double(totalFrames)))
+        srcIndex += 1
+        outIndex += 1
+        onProgress(Progress(stage: .processing(frame: outIndex, total: totalOutputFrames),
+                            fraction: Double(outIndex) / Double(totalOutputFrames)))
 
-        // Walk remaining frames.
+        // Walk remaining frames, decimating to `outputFps`.
         while reader.status == .reading {
             guard let sample = readerOutput.copyNextSampleBuffer(),
                   let pixelBuffer = CMSampleBufferGetImageBuffer(sample) else { break }
+            defer { srcIndex += 1 }
+            if srcIndex % frameStep != 0 { continue }
             let frame = try landscapeCanvas(from: pixelBuffer,
                                             exif: exifOrientation,
                                             isPortrait: isPortrait,
                                             canvasW: canvasW, canvasH: canvasH)
             try await appendFrame(session: session,
                                   frame: frame,
-                                  index: frameIndex,
-                                  fps: fps,
+                                  index: outIndex,
+                                  fps: outputFps,
                                   adaptor: pbAdaptor,
                                   canvasW: canvasW, canvasH: canvasH)
-            frameIndex += 1
-            onProgress(Progress(stage: .processing(frame: frameIndex, total: totalFrames),
-                                fraction: Double(frameIndex) / Double(totalFrames)))
+            outIndex += 1
+            onProgress(Progress(stage: .processing(frame: outIndex, total: totalOutputFrames),
+                                fraction: Double(outIndex) / Double(totalOutputFrames)))
         }
 
         onProgress(Progress(stage: .encoding, fraction: 0.99))
@@ -180,7 +198,7 @@ actor CutoutPipeline {
         return Output(mp4URL: outURL,
                       canvasSize: CGSize(width: canvasW, height: canvasH),
                       sourceOrientation: exifOrientation,
-                      frameCount: frameIndex)
+                      frameCount: outIndex)
     }
 
     // MARK: - Per-frame inference + compositing
