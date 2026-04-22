@@ -197,6 +197,13 @@ enum APNGExporter {
                                            alpha: CGImage,
                                            canvasW: Int, canvasH: Int,
                                            fitAspect: Bool) -> [UInt8] {
+        // Decontaminate: replace matte-edge RGB with the nearest
+        // confident-foreground colour before we composite. Without
+        // this, the un-premultiplication loop below amplifies
+        // background tint at low-α pixels by ~255/α and the APNG
+        // shows a coloured halo around the subject.
+        let cleaned = EdgeClean.cleanForeground(source: source, alpha: alpha) ?? source
+
         var raw = [UInt8](repeating: 0, count: canvasW * canvasH * 4)
         guard let ctx = CGContext(
             data: &raw, width: canvasW, height: canvasH,
@@ -221,22 +228,12 @@ enum APNGExporter {
             drawRect = CGRect(x: 0, y: 0, width: canvasW, height: canvasH)
         }
 
-        ctx.saveGState()
-        ctx.clip(to: drawRect, mask: alpha)
-        ctx.draw(source, in: drawRect)
-        ctx.restoreGState()
+        // `cleaned` already carries (decontaminated RGB, soft α), so
+        // blitting it into the premultiplied destination does the
+        // right thing without an additional clip-to-mask step.
+        ctx.draw(cleaned, in: drawRect)
 
-        // Un-premultiply.
-        var i = 0
-        while i < raw.count {
-            let a = raw[i + 3]
-            if a != 0 && a != 255 {
-                raw[i]     = UInt8(min(255, (Int(raw[i])     * 255 + Int(a) / 2) / Int(a)))
-                raw[i + 1] = UInt8(min(255, (Int(raw[i + 1]) * 255 + Int(a) / 2) / Int(a)))
-                raw[i + 2] = UInt8(min(255, (Int(raw[i + 2]) * 255 + Int(a) / 2) / Int(a)))
-            }
-            i += 4
-        }
+        unpremultiplyInPlace(&raw)
         return raw
     }
 
@@ -318,17 +315,29 @@ enum APNGExporter {
         ctx.clear(CGRect(x: 0, y: 0, width: w, height: h))
         ctx.interpolationQuality = .high
         ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        unpremultiplyInPlace(&raw)
+        return raw
+    }
+
+    /// Un-premultiply a BGRA/RGBA buffer for straight-alpha output, and
+    /// clamp the weakest-α pixels to fully transparent so that rounding
+    /// noise doesn't get amplified into visible colour specks at the
+    /// matte edge. `α < 8` (≈3 % opacity) carries so little signal that
+    /// the `v * 255 / α` division explodes on HEVC chroma-subsampling
+    /// artefacts; we treat those pixels as background.
+    private static func unpremultiplyInPlace(_ raw: inout [UInt8]) {
         var i = 0
         while i < raw.count {
             let a = raw[i + 3]
-            if a != 0 && a != 255 {
+            if a < 8 {
+                raw[i] = 0; raw[i + 1] = 0; raw[i + 2] = 0; raw[i + 3] = 0
+            } else if a != 255 {
                 raw[i]     = UInt8(min(255, (Int(raw[i])     * 255 + Int(a) / 2) / Int(a)))
                 raw[i + 1] = UInt8(min(255, (Int(raw[i + 1]) * 255 + Int(a) / 2) / Int(a)))
                 raw[i + 2] = UInt8(min(255, (Int(raw[i + 2]) * 255 + Int(a) / 2) / Int(a)))
             }
             i += 4
         }
-        return raw
     }
 
     // MARK: - APNG assembly
@@ -518,17 +527,7 @@ enum APNGExporter {
         ctx.clear(CGRect(x: 0, y: 0, width: canvasW, height: canvasH))
         ctx.interpolationQuality = .high
         ctx.draw(frame, in: CGRect(x: dx, y: dy, width: drawW, height: drawH))
-        // Un-premultiply
-        var i = 0
-        while i < raw.count {
-            let a = raw[i + 3]
-            if a != 0 && a != 255 {
-                raw[i]     = UInt8(min(255, (Int(raw[i])     * 255 + Int(a) / 2) / Int(a)))
-                raw[i + 1] = UInt8(min(255, (Int(raw[i + 1]) * 255 + Int(a) / 2) / Int(a)))
-                raw[i + 2] = UInt8(min(255, (Int(raw[i + 2]) * 255 + Int(a) / 2) / Int(a)))
-            }
-            i += 4
-        }
+        unpremultiplyInPlace(&raw)
 
         // Single-frame PNG — no acTL/fcTL/fdAT, just IHDR+IDAT+IEND.
         var out = Data()

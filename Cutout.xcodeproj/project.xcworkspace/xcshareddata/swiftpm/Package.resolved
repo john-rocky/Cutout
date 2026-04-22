@@ -6,8 +6,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/john-rocky/CoreMLZoo.git",
       "state" : {
-        "revision" : "0d2a398fcc47ca98a30dce3317be105ab522a4ed",
-        "version" : "0.1.0"
+        "revision" : "42d0002a159d8fb9a3baa2566924722fa97e0c0f",
+        "version" : "0.1.1"
       }
     }
   ],

@@ -3,7 +3,6 @@ import AVFoundation
 import CoreGraphics
 import CoreImage
 import CoreMLZoo
-import UIKit
 
 /// Input video → per-frame alpha matte → transparent-HEVC or animated-GIF.
 ///
@@ -222,6 +221,12 @@ actor CutoutPipeline {
 
     private func composite(frame: CGImage, alpha: CGImage,
                            canvasW: Int, canvasH: Int) throws -> CVPixelBuffer {
+        // Decontaminate matte-edge colours before rendering. If this step
+        // is skipped, low-α pixels carry the original background's tint,
+        // and HEVC-with-alpha decoders amplify that tint into bright
+        // red/yellow/green speckles on playback.
+        let cleanFrame = EdgeClean.cleanForeground(source: frame, alpha: alpha) ?? frame
+
         var pb: CVPixelBuffer?
         let attrs: [CFString: Any] = [
             kCVPixelBufferCGImageCompatibilityKey: true,
@@ -245,15 +250,12 @@ actor CutoutPipeline {
                         | CGBitmapInfo.byteOrder32Little.rawValue) else {
             throw PipelineError.writerFailed("CGContext")
         }
-        ctx.setFillColor(UIColor.clear.cgColor)
-        ctx.fill(CGRect(x: 0, y: 0, width: canvasW, height: canvasH))
+        ctx.clear(CGRect(x: 0, y: 0, width: canvasW, height: canvasH))
 
-        // Draw frame masked by alpha.
-        ctx.saveGState()
-        ctx.clip(to: CGRect(x: 0, y: 0, width: canvasW, height: canvasH),
-                 mask: alpha)
-        ctx.draw(frame, in: CGRect(x: 0, y: 0, width: canvasW, height: canvasH))
-        ctx.restoreGState()
+        // Draw the cleaned frame masked by alpha. `cleanFrame` already
+        // carries the correct RGBA (decontaminated colour + soft matte),
+        // so we just blit it into the premultiplied destination buffer.
+        ctx.draw(cleanFrame, in: CGRect(x: 0, y: 0, width: canvasW, height: canvasH))
 
         return buffer
     }
