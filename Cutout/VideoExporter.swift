@@ -44,9 +44,12 @@ enum VideoExporter {
         let instr = AVMutableVideoCompositionInstruction()
         instr.timeRange = CMTimeRange(start: .zero, duration: duration)
         let layerInstr = AVMutableVideoCompositionLayerInstruction(assetTrack: track)
-        // Rotate 90° CCW and translate to recenter.
-        let rotate = CGAffineTransform(rotationAngle: -.pi / 2)
-            .concatenating(CGAffineTransform(translationX: 0, y: naturalSize.width))
+        // `CutoutPipeline.landscapeCanvas` rotates portrait source → landscape
+        // with a 90° CW step (`.oriented(.right)`). Undo that with a 90° CCW
+        // rotation (video composition coords are Y-up, so +π/2 is CCW). The
+        // translation recenters the rotated frame inside the renderSize.
+        let rotate = CGAffineTransform(rotationAngle: .pi / 2)
+            .concatenating(CGAffineTransform(translationX: naturalSize.height, y: 0))
         layerInstr.setTransform(rotate, at: .zero)
         instr.layerInstructions = [layerInstr]
         composition.instructions = [instr]
